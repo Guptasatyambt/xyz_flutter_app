@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ipconfig)",
+      "Bash(flutter devices *)",
+      "Bash(Get-Content \"C:\\\\Users\\\\gupta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Application-xyz\\\\e6745c1b-436e-4068-92d3-366da7f438ea\\\\tasks\\\\bmagdlayy.output\" -Wait)",
+      "Bash(Select-String -Pattern \"error|Error|warning|Running|Syncing|Installing|Launching|flutter|✓|✗|FAILED|success|connected|reload\")",
+      "PowerShell(Select-String -Path \"C:\\\\Users\\\\gupta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Application-xyz\\\\e6745c1b-436e-4068-92d3-366da7f438ea\\\\tasks\\\\bmagdlayy.output\" -Pattern \"error|Error|FAILED|Exception|Launching|Running on\" | Select-Object -Last 40 | ForEach-Object { $_.Line })",
+      "PowerShell(Get-Process -Name \"dart\" -ErrorAction SilentlyContinue)",
+      "Bash(Get-ChildItem -Path \"d:\\\\Application\\\\xyz\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(xargs basename -a)",
+      "PowerShell(Select-String -Path \"C:\\\\Users\\\\gupta\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Application-xyz\\\\e6745c1b-436e-4068-92d3-366da7f438ea\\\\tasks\\\\be22bdns6.output\" -Pattern \"E/flutter|key commands|FAILED|Launching\" | Select-Object -Last 10 | ForEach-Object { $_.Line })",
+      "Bash(xargs grep -l \"driver\")",
+      "Bash(xargs grep -l \"driver\\\\|Driver\")",
+      "Bash(ls /d/)",
+      "Read(//d//**)",
+      "Bash(Get-ChildItem -Path \"d:\\\\Application\\\\\" -Directory | Select-Object Name)",
+      "Bash(ls \"C:/Users/gupta/\" 2>&1 | head -30 ; echo \"---\" ; ls \"D:/\" 2>&1 | head -30)",
+      "Read(//c/Users/gupta/**)"
+    ]
+  }
+}

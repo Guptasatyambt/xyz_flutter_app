@@ -1,0 +1,12 @@
+{
+  "dart.flutterSdkPath": "C:\\flutter",
+  "dart.sdkPath": "C:\\flutter\\bin\\cache\\dart-sdk",
+  "editor.formatOnSave": true,
+  "[dart]": {
+    "editor.defaultFormatter": "Dart-Code.dart-code"
+  },
+  "code-runner.executorMap": {
+    "dart": "cd $dir/.. && flutter run"
+  },
+  "code-runner.runInTerminal": true
+}
