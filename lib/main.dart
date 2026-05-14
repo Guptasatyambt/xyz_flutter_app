@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'core/navigation/app_navigator.dart';
 import 'core/services/auth_service.dart';
 import 'core/socket/socket_manager.dart';
@@ -8,8 +9,12 @@ import 'screens/auth/phone_entry_screen.dart';
 import 'screens/driver/driver_home_screen.dart';
 import 'screens/home_screen.dart';
 
+// Replace with your Mapbox public token (pk.eyJ1...) from https://account.mapbox.com
+const _mapboxPublicToken = 'YOUR_MAPBOX_PUBLIC_TOKEN_HERE';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MapboxOptions.setAccessToken(_mapboxPublicToken);
   runApp(const CabApp());
 }
 

@@ -8,5 +8,6 @@
   "code-runner.executorMap": {
     "dart": "cd $dir/.. && flutter run"
   },
-  "code-runner.runInTerminal": true
+  "code-runner.runInTerminal": true,
+  "java.configuration.updateBuildConfiguration": "interactive"
 }

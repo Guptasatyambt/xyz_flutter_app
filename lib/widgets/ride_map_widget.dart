@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 class RideMapWidget extends StatefulWidget {
   final List<LatLng> routePoints;
@@ -21,150 +24,241 @@ class RideMapWidget extends StatefulWidget {
 }
 
 class _RideMapWidgetState extends State<RideMapWidget> {
-  late final MapController _ctrl;
-  bool _fittedWithDriver = false;
+  MapboxMap? _map;
+  PolylineAnnotationManager? _polylineMgr;
+  PointAnnotationManager? _pointMgr;
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = MapController();
-  }
+  PolylineAnnotation? _routeLine;
+  PointAnnotation? _pickupPin;
+  PointAnnotation? _dropPin;
+  PointAnnotation? _carPin;
+
+  // Pre-generated marker images (created once in onMapCreated)
+  Uint8List? _pickupImg;
+  Uint8List? _dropImg;
+  Uint8List? _carImg;
 
   @override
   void didUpdateWidget(RideMapWidget old) {
     super.didUpdateWidget(old);
+    if (_map == null) return;
 
-    final driverFirstArrival =
-        !_fittedWithDriver && widget.driverLocation != null;
-    final routeChanged =
-        old.routePoints.length != widget.routePoints.length ||
-        (old.pickup != widget.pickup || old.drop != widget.drop);
+    final routeChanged = old.routePoints.length != widget.routePoints.length ||
+        old.pickup != widget.pickup ||
+        old.drop != widget.drop;
 
-    if (driverFirstArrival || routeChanged) {
-      if (driverFirstArrival) _fittedWithDriver = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _ctrl.fitCamera(
-          CameraFit.bounds(
-            bounds: _boundsFromPoints(_allPoints()),
-            padding: const EdgeInsets.all(52),
-          ),
-        );
-      });
+    if (routeChanged) {
+      _redrawAll();
+    } else if (old.driverLocation != widget.driverLocation) {
+      _updateCarPin();
     }
   }
 
-  List<LatLng> _allPoints() {
+  Future<void> _onMapCreated(MapboxMap map) async {
+    _map = map;
+
+    // Disable compass and scale bar for a clean embedded map look
+    await map.compass.updateSettings(CompassSettings(enabled: false));
+    await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
+
+    _polylineMgr = await map.annotations.createPolylineAnnotationManager();
+    _pointMgr    = await map.annotations.createPointAnnotationManager();
+
+    // Generate marker images once
+    _pickupImg = await _circleImage(const Color(0xFF4CAF50));
+    _dropImg   = await _circleImage(const Color(0xFFE53935));
+    _carImg    = await _carImage();
+
+    await _redrawAll();
+  }
+
+  Future<void> _redrawAll() async {
+    await _drawRoute();
+    await _drawStaticMarkers();
+    await _drawCarPin();
+    await _fitCamera();
+  }
+
+  Future<void> _drawRoute() async {
+    final mgr = _polylineMgr;
+    if (mgr == null) return;
+    if (_routeLine != null) {
+      await mgr.delete(_routeLine!);
+      _routeLine = null;
+    }
+    if (widget.routePoints.length > 1) {
+      _routeLine = await mgr.create(PolylineAnnotationOptions(
+        geometry: LineString(
+          coordinates: widget.routePoints
+              .map((p) => Position(p.longitude, p.latitude))
+              .toList(),
+        ),
+        lineColor: const Color(0xFF5C6BC0).value,
+        lineWidth: 4.0,
+        lineOpacity: 0.9,
+      ));
+    }
+  }
+
+  Future<void> _drawStaticMarkers() async {
+    final mgr = _pointMgr;
+    if (mgr == null) return;
+
+    if (_pickupPin != null) { await mgr.delete(_pickupPin!); _pickupPin = null; }
+    if (_dropPin != null)   { await mgr.delete(_dropPin!);   _dropPin   = null; }
+
+    _pickupPin = await mgr.create(PointAnnotationOptions(
+      geometry: Point(coordinates: Position(widget.pickup.longitude, widget.pickup.latitude)),
+      image: _pickupImg,
+      iconSize: 1.0,
+    ));
+    _dropPin = await mgr.create(PointAnnotationOptions(
+      geometry: Point(coordinates: Position(widget.drop.longitude, widget.drop.latitude)),
+      image: _dropImg,
+      iconSize: 1.0,
+    ));
+  }
+
+  Future<void> _drawCarPin() async {
+    final mgr = _pointMgr;
+    if (mgr == null) return;
+    if (_carPin != null) { await mgr.delete(_carPin!); _carPin = null; }
+    final loc = widget.driverLocation;
+    if (loc == null) return;
+    _carPin = await mgr.create(PointAnnotationOptions(
+      geometry: Point(coordinates: Position(loc.longitude, loc.latitude)),
+      image: _carImg,
+      iconSize: 1.0,
+    ));
+  }
+
+  Future<void> _updateCarPin() async {
+    final mgr = _pointMgr;
+    if (mgr == null) return;
+    final loc = widget.driverLocation;
+
+    if (loc == null) {
+      if (_carPin != null) { await mgr.delete(_carPin!); _carPin = null; }
+      return;
+    }
+
+    final newPt = Point(coordinates: Position(loc.longitude, loc.latitude));
+    if (_carPin != null) {
+      // Update position in-place — no camera re-fit on every GPS ping
+      _carPin!.geometry = newPt;
+      await mgr.update(_carPin!);
+    } else {
+      // First appearance — create and re-fit to include driver
+      _carPin = await mgr.create(PointAnnotationOptions(
+        geometry: newPt,
+        image: _carImg,
+        iconSize: 1.0,
+      ));
+      await _fitCamera();
+    }
+  }
+
+  Future<void> _fitCamera() async {
+    final map = _map;
+    if (map == null) return;
+
     final pts = <LatLng>[widget.pickup, widget.drop, ...widget.routePoints];
     if (widget.driverLocation != null) pts.add(widget.driverLocation!);
-    return pts;
+
+    double minLat = pts.first.latitude,  maxLat = pts.first.latitude;
+    double minLng = pts.first.longitude, maxLng = pts.first.longitude;
+    for (final p in pts.skip(1)) {
+      if (p.latitude  < minLat) minLat = p.latitude;
+      if (p.latitude  > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
+
+    // Ensure non-zero bounds when points are very close
+    const delta = 0.002;
+    final camera = await map.cameraForCoordinateBounds(
+      CoordinateBounds(
+        southwest: Point(coordinates: Position(minLng - delta, minLat - delta)),
+        northeast: Point(coordinates: Position(maxLng + delta, maxLat + delta)),
+        infiniteBounds: false,
+      ),
+      MbxEdgeInsets(top: 60, left: 40, bottom: 60, right: 40),
+      null, null, null, null,
+    );
+    await map.setCamera(camera);
   }
 
   @override
   Widget build(BuildContext context) {
-    return FlutterMap(
-      mapController: _ctrl,
-      options: MapOptions(
-        initialCameraFit: CameraFit.bounds(
-          bounds: _boundsFromPoints(_allPoints()),
-          padding: const EdgeInsets.all(52),
-        ),
-        interactionOptions: const InteractionOptions(
-          flags: InteractiveFlag.all,
-        ),
-      ),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.xyz',
-        ),
-        if (widget.routePoints.length > 1)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points: widget.routePoints,
-                strokeWidth: 4,
-                color: const Color(0xFF5C6BC0),
-              ),
-            ],
-          ),
-        MarkerLayer(
-          markers: [
-            // Pickup — green filled circle
-            Marker(
-              point: widget.pickup,
-              width: 22,
-              height: 22,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF4CAF50),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.25),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // Drop — red pin (tip aligned to coordinate)
-            Marker(
-              point: widget.drop,
-              width: 30,
-              height: 36,
-              alignment: Alignment.bottomCenter,
-              child: const Icon(
-                Icons.location_on,
-                color: Color(0xFFE53935),
-                size: 36,
-              ),
-            ),
-            // Driver car marker
-            if (widget.driverLocation != null)
-              Marker(
-                point: widget.driverLocation!,
-                width: 36,
-                height: 36,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A1A2E),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.directions_car,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ],
+    return MapWidget(
+      styleUri: MapboxStyles.MAPBOX_STREETS,
+      onMapCreated: _onMapCreated,
     );
   }
 
-  static LatLngBounds _boundsFromPoints(List<LatLng> points) {
-    double minLat = points.first.latitude;
-    double maxLat = points.first.latitude;
-    double minLng = points.first.longitude;
-    double maxLng = points.first.longitude;
-    for (final p in points.skip(1)) {
-      if (p.latitude < minLat) minLat = p.latitude;
-      if (p.latitude > maxLat) maxLat = p.latitude;
-      if (p.longitude < minLng) minLng = p.longitude;
-      if (p.longitude > maxLng) maxLng = p.longitude;
-    }
-    return LatLngBounds(LatLng(minLat, minLng), LatLng(maxLat, maxLng));
+  // ── Marker image generators ────────────────────────────────────────────────
+
+  static Future<Uint8List> _circleImage(Color color) async {
+    const sz = 44.0;
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec, const Rect.fromLTWH(0, 0, sz, sz));
+    canvas.drawCircle(
+      const Offset(sz / 2, sz / 2),
+      15,
+      Paint()..color = color,
+    );
+    canvas.drawCircle(
+      const Offset(sz / 2, sz / 2),
+      15,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+    final img = await rec.endRecording().toImage(sz.toInt(), sz.toInt());
+    final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+    return bytes!.buffer.asUint8List();
+  }
+
+  static Future<Uint8List> _carImage() async {
+    const sz = 48.0;
+    const bg = Color(0xFF1A1A2E);
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec, const Rect.fromLTWH(0, 0, sz, sz));
+
+    // Dark circle background
+    canvas.drawCircle(
+      const Offset(sz / 2, sz / 2),
+      21,
+      Paint()..color = bg,
+    );
+    canvas.drawCircle(
+      const Offset(sz / 2, sz / 2),
+      21,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+
+    // Car body (white)
+    final carPaint = Paint()..color = Colors.white;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(const Rect.fromLTWH(9, 22, 30, 14), const Radius.circular(3)),
+      carPaint,
+    );
+    // Roof
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(const Rect.fromLTWH(13, 13, 22, 12), const Radius.circular(3)),
+      carPaint,
+    );
+    // Wheels
+    final wheelPaint = Paint()..color = const Color(0xFF555555);
+    canvas.drawCircle(const Offset(15, 36), 4, wheelPaint);
+    canvas.drawCircle(const Offset(33, 36), 4, wheelPaint);
+
+    final img = await rec.endRecording().toImage(sz.toInt(), sz.toInt());
+    final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+    return bytes!.buffer.asUint8List();
   }
 }
