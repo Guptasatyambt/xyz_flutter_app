@@ -93,7 +93,7 @@ class _RideMapWidgetState extends State<RideMapWidget> {
               .map((p) => Position(p.longitude, p.latitude))
               .toList(),
         ),
-        lineColor: const Color(0xFF5C6BC0).value,
+        lineColor: const Color(0xFF5C6BC0).toARGB32(),
         lineWidth: 4.0,
         lineOpacity: 0.9,
       ));

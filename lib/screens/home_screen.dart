@@ -1,8 +1,12 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+
 import '../core/models/geo_models.dart';
 import '../core/models/user_model.dart';
 import '../core/services/auth_service.dart';
@@ -31,7 +35,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List<NearbyDriver> _nearbyDrivers = [];
   UserModel? _user;
 
-  final _mapController = MapController();
+  MapboxMap? _map;
+  PointAnnotationManager? _driversMgr;
+  Uint8List? _driverDotImg;
+  bool _programmaticMove = false;
 
   // Default centre: New Delhi
   static const _defaultLat = 28.6139;
@@ -88,10 +95,19 @@ class _HomeScreenState extends State<HomeScreen> {
         _hasGpsFix = true;
       });
 
-      // Move map to GPS position
-      try {
-        _mapController.move(LatLng(pos.latitude, pos.longitude), 15.0);
-      } catch (_) {}
+      // Move map to GPS position if map is already created
+      if (_map != null) {
+        _programmaticMove = true;
+        try {
+          await _map!.flyTo(
+            CameraOptions(
+              center: Point(coordinates: Position(pos.longitude, pos.latitude)),
+              zoom: 15.0,
+            ),
+            MapAnimationOptions(duration: 800),
+          );
+        } catch (_) {}
+      }
 
       // Reverse geocode
       try {
@@ -104,11 +120,66 @@ class _HomeScreenState extends State<HomeScreen> {
       // Nearby drivers
       try {
         final drivers = await GeoService.getNearbyDrivers(pos.latitude, pos.longitude);
-        if (mounted) setState(() => _nearbyDrivers = drivers);
+        if (mounted) {
+          setState(() => _nearbyDrivers = drivers);
+          await _refreshDriverMarkers();
+        }
       } catch (_) {}
     } catch (_) {
       if (mounted) setState(() => _currentAddress = 'Could not get location');
     }
+  }
+
+  // ── Mapbox callbacks ───────────────────────────────────────────────────────
+
+  Future<void> _onMapCreated(MapboxMap map) async {
+    _map = map;
+
+    await map.compass.updateSettings(CompassSettings(enabled: false));
+    await map.scaleBar.updateSettings(ScaleBarSettings(enabled: false));
+
+    _driversMgr = await map.annotations.createPointAnnotationManager();
+    _driverDotImg = await _buildDriverDotImage();
+
+    // Fly to GPS position if already acquired
+    if (_centerLat != null && _centerLng != null) {
+      _programmaticMove = true;
+      try {
+        await map.flyTo(
+          CameraOptions(
+            center: Point(coordinates: Position(_centerLng!, _centerLat!)),
+            zoom: 15.0,
+          ),
+          MapAnimationOptions(duration: 800),
+        );
+      } catch (_) {}
+    }
+
+    // Render drivers already fetched before map was ready
+    if (_nearbyDrivers.isNotEmpty) {
+      await _refreshDriverMarkers();
+    }
+  }
+
+  void _onCameraChange(CameraChangedEventData _) {
+    if (_programmaticMove) return;
+    if (!_isMoving) setState(() => _isMoving = true);
+  }
+
+  Future<void> _onMapIdle(MapIdleEventData _) async {
+    if (_programmaticMove) {
+      _programmaticMove = false;
+      return;
+    }
+    if (!_isMoving) return;
+    setState(() => _isMoving = false);
+
+    final state = await _map?.getCameraState();
+    if (state == null || !mounted) return;
+
+    final lat = state.center.coordinates.lat.toDouble();
+    final lng = state.center.coordinates.lng.toDouble();
+    await _onMapMoved(LatLng(lat, lng));
   }
 
   Future<void> _onMapMoved(LatLng center) async {
@@ -134,8 +205,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final drivers = await GeoService.getNearbyDrivers(center.latitude, center.longitude);
-      if (mounted) setState(() => _nearbyDrivers = drivers);
+      if (mounted) {
+        setState(() => _nearbyDrivers = drivers);
+        await _refreshDriverMarkers();
+      }
     } catch (_) {}
+  }
+
+  // ── Driver marker helpers ──────────────────────────────────────────────────
+
+  Future<void> _refreshDriverMarkers() async {
+    final mgr = _driversMgr;
+    final img = _driverDotImg;
+    if (mgr == null || img == null) return;
+
+    await mgr.deleteAll();
+    if (_nearbyDrivers.isEmpty) return;
+
+    await mgr.createMulti(
+      _nearbyDrivers
+          .map((d) => PointAnnotationOptions(
+                geometry: Point(coordinates: Position(d.lng, d.lat)),
+                image: img,
+                iconSize: 1.0,
+              ))
+          .toList(),
+    );
+  }
+
+  static Future<Uint8List> _buildDriverDotImage() async {
+    const sz = 20.0;
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec, const Rect.fromLTWH(0, 0, sz, sz));
+    canvas.drawCircle(
+      const Offset(sz / 2, sz / 2),
+      8,
+      Paint()..color = const Color(0xFF4CAF50),
+    );
+    canvas.drawCircle(
+      const Offset(sz / 2, sz / 2),
+      8,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    final img = await rec.endRecording().toImage(sz.toInt(), sz.toInt());
+    final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+    return bytes!.buffer.asUint8List();
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -147,56 +264,18 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
         body: Stack(
           children: [
-            // ── Real map ───────────────────────────────────────────────────
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: LatLng(
-                  _centerLat ?? _defaultLat,
-                  _centerLng ?? _defaultLng,
+            // ── Mapbox map ─────────────────────────────────────────────────
+            MapWidget(
+              styleUri: MapboxStyles.MAPBOX_STREETS,
+              cameraOptions: CameraOptions(
+                center: Point(
+                  coordinates: Position(_defaultLng, _defaultLat),
                 ),
-                initialZoom: 15.0,
-                onMapEvent: (event) {
-                  if (event is MapEventMove &&
-                      event.source != MapEventSource.mapController) {
-                    if (!_isMoving) setState(() => _isMoving = true);
-                  } else if (event is MapEventMoveEnd) {
-                    if (_isMoving) {
-                      setState(() => _isMoving = false);
-                      _onMapMoved(event.camera.center);
-                    }
-                  }
-                },
+                zoom: 15.0,
               ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.xyz',
-                ),
-                // Nearby driver dots
-                MarkerLayer(
-                  markers: _nearbyDrivers
-                      .map((d) => Marker(
-                            point: LatLng(d.lat, d.lng),
-                            width: 18,
-                            height: 18,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF4CAF50),
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.2),
-                                    blurRadius: 3,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ))
-                      .toList(),
-                ),
-              ],
+              onMapCreated: _onMapCreated,
+              onCameraChangeListener: _onCameraChange,
+              onMapIdleListener: _onMapIdle,
             ),
 
             // ── Pickup pin overlay (stays centred, doesn't scroll with map)
