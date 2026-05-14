@@ -1,9 +1,8 @@
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:geolocator/geolocator.dart' as geo;
 import 'package:latlong2/latlong.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
@@ -68,24 +67,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initLocation() async {
-    if (!await Geolocator.isLocationServiceEnabled()) {
+    if (!await geo.Geolocator.isLocationServiceEnabled()) {
       if (mounted) setState(() => _currentAddress = 'Location services off');
       return;
     }
 
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
+    var perm = await geo.Geolocator.checkPermission();
+    if (perm == geo.LocationPermission.denied) {
+      perm = await geo.Geolocator.requestPermission();
     }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
+    if (perm == geo.LocationPermission.denied ||
+        perm == geo.LocationPermission.deniedForever) {
       if (mounted) setState(() => _currentAddress = 'Location permission denied');
       return;
     }
 
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      final pos = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.high,
+        ),
       );
       if (!mounted) return;
 
@@ -95,7 +96,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _hasGpsFix = true;
       });
 
-      // Move map to GPS position if map is already created
+      // Fly map to GPS position if map is already created
       if (_map != null) {
         _programmaticMove = true;
         try {
@@ -141,19 +142,17 @@ class _HomeScreenState extends State<HomeScreen> {
     _driversMgr = await map.annotations.createPointAnnotationManager();
     _driverDotImg = await _buildDriverDotImage();
 
-    // Fly to GPS position if already acquired
-    if (_centerLat != null && _centerLng != null) {
-      _programmaticMove = true;
-      try {
-        await map.flyTo(
-          CameraOptions(
-            center: Point(coordinates: Position(_centerLng!, _centerLat!)),
-            zoom: 15.0,
-          ),
-          MapAnimationOptions(duration: 800),
-        );
-      } catch (_) {}
-    }
+    // Place camera at GPS fix (if already acquired) or default New Delhi
+    _programmaticMove = true;
+    await map.setCamera(CameraOptions(
+      center: Point(
+        coordinates: Position(
+          _centerLng ?? _defaultLng,
+          _centerLat ?? _defaultLat,
+        ),
+      ),
+      zoom: 15.0,
+    ));
 
     // Render drivers already fetched before map was ready
     if (_nearbyDrivers.isNotEmpty) {
@@ -267,12 +266,6 @@ class _HomeScreenState extends State<HomeScreen> {
             // ── Mapbox map ─────────────────────────────────────────────────
             MapWidget(
               styleUri: MapboxStyles.MAPBOX_STREETS,
-              cameraOptions: CameraOptions(
-                center: Point(
-                  coordinates: Position(_defaultLng, _defaultLat),
-                ),
-                zoom: 15.0,
-              ),
               onMapCreated: _onMapCreated,
               onCameraChangeListener: _onCameraChange,
               onMapIdleListener: _onMapIdle,
