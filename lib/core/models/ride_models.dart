@@ -1,3 +1,68 @@
+class VehicleInfo {
+  final String make;
+  final String model;
+  final String plateNumber;
+  final String? color;
+
+  const VehicleInfo({
+    required this.make,
+    required this.model,
+    required this.plateNumber,
+    this.color,
+  });
+
+  factory VehicleInfo.fromJson(Map<String, dynamic> j) => VehicleInfo(
+        make: j['make'] as String,
+        model: j['model'] as String,
+        plateNumber: j['plateNumber'] as String,
+        color: j['color'] as String?,
+      );
+}
+
+class RiderInfo {
+  final String? name;
+  final String phone;
+
+  const RiderInfo({this.name, required this.phone});
+
+  factory RiderInfo.fromJson(Map<String, dynamic> j) => RiderInfo(
+        name: j['name'] as String?,
+        phone: j['phone'] as String,
+      );
+
+  String get displayName => name?.isNotEmpty == true ? name! : 'Rider';
+}
+
+class DriverInfo {
+  final String? name;
+  final String phone;
+  final double rating;
+  final int ratingCount;
+  final VehicleInfo? vehicle;
+
+  const DriverInfo({
+    this.name,
+    required this.phone,
+    required this.rating,
+    required this.ratingCount,
+    this.vehicle,
+  });
+
+  factory DriverInfo.fromJson(Map<String, dynamic> j) => DriverInfo(
+        name: j['name'] as String?,
+        phone: j['phone'] as String,
+        rating: (j['rating'] as num? ?? 5.0).toDouble(),
+        ratingCount: j['ratingCount'] as int? ?? 0,
+        vehicle: j['vehicle'] != null
+            ? VehicleInfo.fromJson(j['vehicle'] as Map<String, dynamic>)
+            : null,
+      );
+
+  String get displayName => name?.isNotEmpty == true ? name! : 'Your Driver';
+
+  String get ratingText => rating.toStringAsFixed(1);
+}
+
 class Ride {
   final String id;
   final String riderId;
@@ -26,6 +91,8 @@ class Ride {
   final DateTime? startedAt;
   final DateTime? completedAt;
   final DateTime? cancelledAt;
+  final DriverInfo? driverInfo;
+  final RiderInfo? riderInfo;
 
   const Ride({
     required this.id,
@@ -55,6 +122,8 @@ class Ride {
     this.startedAt,
     this.completedAt,
     this.cancelledAt,
+    this.driverInfo,
+    this.riderInfo,
   });
 
   factory Ride.fromJson(Map<String, dynamic> j) => Ride(
@@ -95,6 +164,12 @@ class Ride {
             : null,
         cancelledAt: j['cancelledAt'] != null
             ? DateTime.parse(j['cancelledAt'] as String)
+            : null,
+        driverInfo: j['driverInfo'] != null
+            ? DriverInfo.fromJson(j['driverInfo'] as Map<String, dynamic>)
+            : null,
+        riderInfo: j['riderInfo'] != null
+            ? RiderInfo.fromJson(j['riderInfo'] as Map<String, dynamic>)
             : null,
       );
 
@@ -154,6 +229,9 @@ class Ride {
       startedAt: parseDate(j['startedAt']) ?? current?.startedAt,
       completedAt: parseDate(j['completedAt']) ?? current?.completedAt,
       cancelledAt: parseDate(j['cancelledAt']) ?? current?.cancelledAt,
+      // Preserve info from previous ride since socket payload omits them.
+      driverInfo: current?.driverInfo,
+      riderInfo: current?.riderInfo,
     );
   }
 
@@ -179,6 +257,7 @@ class Ride {
         'REQUESTED',
         'SEARCHING',
         'DRIVER_ARRIVING',
+        'DRIVER_ARRIVED',
       }.contains(status);
 
   bool get isCompleted => status == 'COMPLETED';

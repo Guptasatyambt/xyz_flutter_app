@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/auth_models.dart';
 import '../../core/services/auth_service.dart';
-import 'otp_screen.dart';
+import '../../rider/screens/auth/otp_screen.dart' as rider_auth;
+import '../../driver/screens/auth/otp_screen.dart' as driver_auth;
 
 class PhoneEntryScreen extends StatefulWidget {
   const PhoneEntryScreen({super.key});
@@ -46,7 +47,9 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => OtpScreen(phone: _e164, role: _role),
+          builder: (_) => _role == 'DRIVER'
+              ? driver_auth.OtpScreen(phone: _e164, role: _role)
+              : rider_auth.OtpScreen(phone: _e164, role: _role),
         ),
       );
     } on ApiException catch (e) {

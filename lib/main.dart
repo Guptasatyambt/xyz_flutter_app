@@ -4,17 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'core/navigation/app_navigator.dart';
 import 'core/services/auth_service.dart';
+import 'core/models/ride_models.dart';
 import 'core/socket/socket_manager.dart';
 import 'screens/auth/phone_entry_screen.dart';
-import 'screens/driver/driver_home_screen.dart';
-import 'screens/home_screen.dart';
-
-// Replace with your Mapbox public token (pk.eyJ1...) from https://account.mapbox.com
-const _mapboxPublicToken = 'YOUR_MAPBOX_PUBLIC_TOKEN_HERE';
+import 'rider/services/ride_service.dart';
+import 'rider/screens/active_ride_screen.dart';
+import 'rider/screens/rider_shell.dart';
+import 'driver/screens/home_screen.dart';
+import 'secrets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MapboxOptions.setAccessToken(_mapboxPublicToken);
+  MapboxOptions.setAccessToken(mapboxPublicToken);
   runApp(const CabApp());
 }
 
@@ -79,13 +80,27 @@ class _StartupGateState extends State<_StartupGate> {
       } else if (user.role == 'RIDER') {
         unawaited(SocketManager.instance.connectRider());
       }
-      final dest = user.role == 'DRIVER'
-          ? const DriverHomeScreen()
-          : const HomeScreen();
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => dest),
-      );
+      if (user.role == 'DRIVER') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const DriverHomeScreen()),
+        );
+      } else {
+        // For riders: check for an active ride and resume it directly.
+        Ride? activeRide;
+        try {
+          activeRide = await RideService.getActiveRide();
+        } catch (_) {}
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => activeRide != null
+                ? ActiveRideScreen(initialRide: activeRide)
+                : const RiderShell(),
+          ),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       Navigator.pushReplacement(
