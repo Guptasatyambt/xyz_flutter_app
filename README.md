@@ -39,7 +39,8 @@ A Flutter-based ride-hailing mobile application (Uber/Rapido-style) supporting b
 
 | Concern | Package |
 |---|---|
-| Maps & routing | `flutter_map` + `latlong2` (OpenStreetMap tiles) |
+| Maps | `mapbox_maps_flutter` |
+| Routing / geometry | `latlong2` |
 | GPS / location | `geolocator` |
 | Real-time events | `socket_io_client` |
 | HTTP | `http` |
@@ -116,15 +117,28 @@ Status change (arrived / started)
 
 - Flutter SDK ≥ 3.11.5
 - Android device or emulator (API 21+)
+- A [Mapbox account](https://account.mapbox.com) with a public token (`pk.eyJ1…`)
 
-### Run
+### 1 — Create your secrets file
+
+`lib/secrets.dart` is excluded from version control. Copy the example and add your token:
+
+```bash
+cp lib/secrets.dart.example lib/secrets.dart
+```
+
+Then open `lib/secrets.dart` and replace the placeholder with your real Mapbox public token.
+
+### 2 — Configure the backend URL
+
+Set your backend base URL in [lib/core/api/api_endpoints.dart](lib/core/api/api_endpoints.dart).
+
+### 3 — Run
 
 ```bash
 flutter pub get
 flutter run
 ```
-
-Set your backend base URL in [lib/core/api/api_endpoints.dart](lib/core/api/api_endpoints.dart) before running.
 
 ---
 
